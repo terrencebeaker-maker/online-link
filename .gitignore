@@ -1,0 +1,4 @@
+# Ignore these folders when pushing to GitHub
+/vendor
+/node_modules
+.env
