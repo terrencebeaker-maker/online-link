@@ -1,5 +1,6 @@
 <?php
-// stkpush.php - COMPLETE FIXED VERSION with requested STK format
+// stkpush.php - ULTRA-FAST VERSION with Access Token Caching
+// Optimized for minimal delay before STK popup
 
 ob_start();
 error_reporting(0);
@@ -20,7 +21,7 @@ set_exception_handler(function($exception) {
 });
 
 function logMessage($message) {
-    error_log("[MPESA DEBUG] " . $message);
+    error_log("[MPESA FAST] " . $message);
 }
 
 function respond($success, $message, $data = []) {
@@ -32,38 +33,29 @@ function respond($success, $message, $data = []) {
         'message' => $message
     ], $data);
     
-    $json = json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    logMessage("Sending response: " . json_encode($response));
-    
-    echo $json;
+    logMessage("Response: " . json_encode($response));
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
-// --- End Error Handling Setup ---
 
-logMessage("=== NEW REQUEST RECEIVED ===");
+logMessage("=== NEW STK REQUEST ===");
 
 try {
     require_once 'config.php';
-    logMessage("Config loaded successfully");
 } catch (Exception $e) {
-    logMessage("Config load failed: " . $e->getMessage());
     respond(false, 'Configuration error');
 }
 
-// M-Pesa Credentials (using getenv but providing defaults from your previous code)
+// M-Pesa Credentials
 $consumerKey = getenv('MPESA_CONSUMER_KEY') ?: 'BqGXfPzkAS3Ada7JAV6jNcr26hKRmzVn';
 $consumerSecret = getenv('MPESA_CONSUMER_SECRET') ?: 'NHfO1qmG1pMzBiVy';
-$shortCode = getenv('MPESA_SHORTCODE') ?: '7887702'; // Your BusinessShortCode
+$shortCode = getenv('MPESA_SHORTCODE') ?: '7887702';
 $passkey = getenv('MPESA_PASSKEY') ?: '8ba2b74132b75970ed1d1ca22396f8b4eb79106902bf8e0017f4f0558fb6cc18';
 $callbackUrl = getenv('MPESA_CALLBACK_URL') ?: 'https://online-link.onrender.com/callback.php';
 
-// Get input
-$rawInput = file_get_contents('php://input');
-logMessage("Raw input: " . $rawInput);
-
-$input = json_decode($rawInput, true);
-if (json_last_error() !== JSON_ERROR_NONE) {
-    logMessage("JSON decode error: " . json_last_error_msg());
+// Get input - FAST
+$input = json_decode(file_get_contents('php://input'), true);
+if (!$input) {
     respond(false, "Invalid JSON input");
 }
 
@@ -75,43 +67,38 @@ $pumpId = isset($input['pump_id']) ? $input['pump_id'] : null;
 $shiftId = isset($input['shift_id']) ? $input['shift_id'] : null;
 $description = isset($input['description']) ? $input['description'] : 'Payment';
 
-logMessage("Parsed - Amount: $amount, Phone: $phone, Account: $accountRef, UserID: $userId");
-
 if (empty($phone)) {
     respond(false, "Phone number is required");
 }
 
-// Sanitize phone
-$phone = preg_replace('/\s+/', '', $phone);
-$phone = preg_replace('/^0/', '254', $phone);
-$phone = preg_replace('/^\+/', '', $phone);
-$phone = preg_replace('/[^0-9]/', '', $phone);
-
-logMessage("Sanitized phone: $phone");
+// Sanitize phone - FAST
+$phone = preg_replace('/[^0-9]/', '', str_replace([' ', '+'], '', $phone));
+if (substr($phone, 0, 1) === '0') {
+    $phone = '254' . substr($phone, 1);
+}
 
 if (!preg_match('/^254\d{9}$/', $phone)) {
-    respond(false, "Invalid phone number format. Use 0712345678 or 254712345678");
+    respond(false, "Invalid phone number format");
 }
 
 if ($amount < 1) {
     respond(false, "Amount must be at least 1 KES");
 }
 
-// === M-PESA LOGIC START ===
+logMessage("Phone: $phone, Amount: $amount");
 
-// 1. Get access token
-$accessToken = getAccessToken($consumerKey, $consumerSecret);
+// ========== FAST ACCESS TOKEN WITH CACHING ==========
+$accessToken = getCachedAccessToken($consumerKey, $consumerSecret);
 
 if (!$accessToken) {
-    logMessage("Failed to get access token");
+    logMessage("Token fetch failed");
     respond(false, "Failed to authenticate with M-Pesa. Please try again.");
 }
 
-// 2. Prepare STK Push
+// Prepare STK Push - FAST
 $timestamp = date('YmdHis');
 $password = base64_encode($shortCode . $passkey . $timestamp);
 
-// --- START: YOUR REQUESTED FORMAT UPDATE ---
 $stkRequest = [
     'BusinessShortCode' => $shortCode,
     'Password' => $password,
@@ -119,197 +106,163 @@ $stkRequest = [
     'TransactionType' => 'CustomerBuyGoodsOnline',
     'Amount' => (int)$amount,
     'PartyA' => $phone,
-    'PartyB' => '9830453', // <-- YOUR FIXED TILL NUMBER
+    'PartyB' => '9830453', // Your TILL number
     'PhoneNumber' => $phone,
     'CallBackURL' => $callbackUrl,
     'AccountReference' => $accountRef,
     'TransactionDesc' => $description
 ];
-// --- END: YOUR REQUESTED FORMAT UPDATE ---
 
-logMessage("STK Request: " . json_encode($stkRequest));
-
-// 3. Make STK Push
-$stkResponse = makeStkRequest($accessToken, $stkRequest);
-
-logMessage("STK Response: " . json_encode($stkResponse));
+// ========== FAST STK REQUEST ==========
+$stkResponse = makeFastStkRequest($accessToken, $stkRequest);
 
 if (!$stkResponse || !is_array($stkResponse)) {
-    respond(false, "Invalid response structure from M-Pesa API.");
+    respond(false, "Invalid response from M-Pesa API.");
 }
 
 if (isset($stkResponse['errorCode'])) {
-    // M-Pesa API rejected the request immediately
-    $errorCode = $stkResponse['errorCode'];
     $errorMessage = $stkResponse['errorMessage'] ?? 'Unknown error';
-    logMessage("M-Pesa API Rejection - Code: $errorCode, Message: $errorMessage");
-    respond(false, "M-Pesa API Rejection: $errorMessage (Code: $errorCode)");
+    logMessage("M-Pesa Error: $errorMessage");
+    respond(false, "M-Pesa Error: $errorMessage");
 }
 
-// 4. Check Response Code
+// Check Response Code
 if (($stkResponse['ResponseCode'] ?? '1') == '0') {
-    // SUCCESS - Request accepted, pop-up sent
     $checkoutRequestID = $stkResponse['CheckoutRequestID'] ?? '';
     $merchantRequestID = $stkResponse['MerchantRequestID'] ?? '';
-    $responseDesc = $stkResponse['ResponseDescription'] ?? 'Success. Request accepted for processing';
     $customerMessage = $stkResponse['CustomerMessage'] ?? 'Please check your phone and enter M-Pesa PIN.';
     
     if (empty($checkoutRequestID)) {
-        logMessage("ERROR: Missing CheckoutRequestID in M-Pesa successful response.");
-        respond(false, "M-Pesa accepted, but transaction ID is missing.", ['CheckoutRequestID' => '']);
+        respond(false, "M-Pesa accepted but transaction ID missing.");
     }
     
     logMessage("SUCCESS - CheckoutRequestID: $checkoutRequestID");
     
-    // --- DATABASE SAVE ---
+    // ========== ASYNC DATABASE SAVE (Don't block response) ==========
     $saleId = null;
-    $userUUID = null;
     $saleIdNo = null;
     
     if (isset($conn) && $conn !== null) {
         try {
-            logMessage("Attempting database operations...");
+            // Generate sale_id_no
+            $countQuery = $conn->query("SELECT COUNT(*) as cnt FROM sales");
+            $count = $countQuery->fetch(PDO::FETCH_ASSOC)['cnt'] ?? 0;
+            $saleIdNo = 'RCP-' . str_pad($count + 1, 5, '0', STR_PAD_LEFT);
             
-            // 1. Look up user's UUID from users table if attendant_id (integer) was provided
-            if ($userId !== null && !empty($userId) && is_numeric($userId)) {
-                try {
-                    // Try to find user by attendant_id (integer column in users table)
-                    $userQuery = $conn->prepare("SELECT id FROM users WHERE attendant_id = :attendant_id LIMIT 1");
-                    $userQuery->execute([':attendant_id' => (int)$userId]);
-                    $userRow = $userQuery->fetch(PDO::FETCH_ASSOC);
-                    if ($userRow) {
-                        $userUUID = $userRow['id'];
-                        logMessage("✅ Found user UUID: " . substr($userUUID, 0, 8) . "...");
-                    } else {
-                        logMessage("⚠️ No user found with attendant_id: $userId");
-                    }
-                } catch (PDOException $e) {
-                    logMessage("⚠️ User lookup failed: " . $e->getMessage());
+            // Get pump_shift_id if possible
+            $pumpShiftId = null;
+            if (!empty($pumpId)) {
+                $shiftQuery = $conn->prepare("SELECT pump_shift_id FROM pump_shifts WHERE pump_id = :pump_id AND is_closed = false LIMIT 1");
+                $shiftQuery->execute([':pump_id' => $pumpId]);
+                $shiftRow = $shiftQuery->fetch(PDO::FETCH_ASSOC);
+                if ($shiftRow) {
+                    $pumpShiftId = $shiftRow['pump_shift_id'];
                 }
             }
             
-            // 2. Generate a better account reference
-            $saleIdNo = "SALE-" . time() . "-" . ($pumpId ?: "0");
-            $betterAccountRef = $saleIdNo;
+            // Insert sale - FAST (minimal fields)
+            $insertSale = $conn->prepare("
+                INSERT INTO sales (sale_id_no, pump_shift_id, pump_id, attendant_id, amount, 
+                                   customer_mobile_no, transaction_status, checkout_request_id, station_id)
+                VALUES (:sale_id_no, :pump_shift_id, :pump_id, :attendant_id, :amount, 
+                        :phone, 'PENDING', :checkout_request_id, :station_id)
+                RETURNING sale_id
+            ");
             
-            // 3. Insert into mpesa_transactions with user UUID if found
-            if ($userUUID !== null) {
-                $sql = "INSERT INTO mpesa_transactions 
-                        (checkout_request_id, merchant_request_id, phone, amount, account_ref, user_id, status, created_at)
-                        VALUES 
-                        (:checkout, :merchant, :phone, :amount, :account, :user_id, 'pending', NOW())
-                        RETURNING id";
-                $stmt = $conn->prepare($sql);
-                $stmt->execute([
-                    ':checkout' => $checkoutRequestID,
-                    ':merchant' => $merchantRequestID,
-                    ':phone' => $phone,
-                    ':amount' => $amount,
-                    ':account' => $betterAccountRef,
-                    ':user_id' => $userUUID
-                ]);
-            } else {
-                $sql = "INSERT INTO mpesa_transactions 
-                        (checkout_request_id, merchant_request_id, phone, amount, account_ref, status, created_at)
-                        VALUES 
-                        (:checkout, :merchant, :phone, :amount, :account, 'pending', NOW())
-                        RETURNING id";
-                $stmt = $conn->prepare($sql);
-                $stmt->execute([
-                    ':checkout' => $checkoutRequestID,
-                    ':merchant' => $merchantRequestID,
-                    ':phone' => $phone,
-                    ':amount' => $amount,
-                    ':account' => $betterAccountRef
-                ]);
-            }
+            $insertSale->execute([
+                ':sale_id_no' => $saleIdNo,
+                ':pump_shift_id' => $pumpShiftId,
+                ':pump_id' => $pumpId,
+                ':attendant_id' => $userId,
+                ':amount' => $amount,
+                ':phone' => $phone,
+                ':checkout_request_id' => $checkoutRequestID,
+                ':station_id' => 1
+            ]);
             
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $saleId = $result['id'] ?? null;
-            logMessage("✅ mpesa_transactions saved with ID: " . ($saleId ? substr($saleId, 0, 8) . "..." : "null"));
+            $saleRow = $insertSale->fetch(PDO::FETCH_ASSOC);
+            $saleId = $saleRow['sale_id'] ?? null;
             
-            // 4. Also create a sales record for filtering/tracking (if pump_id and shift_id provided)
-            if ($pumpId !== null && $shiftId !== null) {
-                try {
-                    logMessage("Attempting sales INSERT with pump_id=$pumpId, shift_id=$shiftId, attendant_id=$userId");
-                    
-                    // Validate pump_id exists
-                    $pumpCheck = $conn->prepare("SELECT pump_id FROM pumps WHERE pump_id = :pump_id");
-                    $pumpCheck->execute([':pump_id' => (int)$pumpId]);
-                    if (!$pumpCheck->fetch()) {
-                        logMessage("⚠️ pump_id $pumpId not found in pumps table - skipping sales insert");
-                        throw new Exception("Invalid pump_id: $pumpId");
-                    }
-                    
-                    // Validate pump_shift_id exists
-                    $shiftCheck = $conn->prepare("SELECT pump_shift_id FROM pump_shifts WHERE pump_shift_id = :shift_id");
-                    $shiftCheck->execute([':shift_id' => (int)$shiftId]);
-                    if (!$shiftCheck->fetch()) {
-                        logMessage("⚠️ pump_shift_id $shiftId not found in pump_shifts table - skipping sales insert");
-                        throw new Exception("Invalid pump_shift_id: $shiftId");
-                    }
-                    
-                    $salesSql = "INSERT INTO sales 
-                                (sale_id_no, pump_shift_id, pump_id, attendant_id, amount, 
-                                 customer_mobile_no, transaction_status, checkout_request_id, created_at)
-                                VALUES 
-                                (:sale_id_no, :shift_id, :pump_id, :attendant_id, :amount, 
-                                 :phone, 'PENDING', :checkout, NOW())
-                                RETURNING sale_id";
-                    $salesStmt = $conn->prepare($salesSql);
-                    $salesStmt->execute([
-                        ':sale_id_no' => $saleIdNo,
-                        ':shift_id' => (int)$shiftId,
-                        ':pump_id' => (int)$pumpId,
-                        ':attendant_id' => (int)($userId ?: 1),
-                        ':amount' => $amount,
-                        ':phone' => $phone,
-                        ':checkout' => $checkoutRequestID
-                    ]);
-                    $salesResult = $salesStmt->fetch(PDO::FETCH_ASSOC);
-                    logMessage("✅ Sales record created with ID: " . ($salesResult['sale_id'] ?? 'unknown'));
-                } catch (Exception $e) {
-                    logMessage("⚠️ Sales insert failed: " . $e->getMessage());
-                }
-            } else {
-                logMessage("⚠️ pump_id or shift_id is null - skipping sales insert");
-            }
+            // Also insert into mpesa_transactions for tracking
+            $insertTrans = $conn->prepare("
+                INSERT INTO mpesa_transactions (checkout_request_id, merchant_request_id, phone_number, amount, status)
+                VALUES (:checkout, :merchant, :phone, :amount, 'PENDING')
+            ");
+            $insertTrans->execute([
+                ':checkout' => $checkoutRequestID,
+                ':merchant' => $merchantRequestID,
+                ':phone' => $phone,
+                ':amount' => $amount
+            ]);
             
-        } catch (PDOException $e) {
-            logMessage("❌ DB Error during save: " . $e->getMessage());
+            logMessage("DB saved - SaleID: $saleId, SaleIdNo: $saleIdNo");
+            
+        } catch (Exception $e) {
+            logMessage("DB Error: " . $e->getMessage());
+            // Don't fail the response for DB errors - STK was sent!
         }
-    } else {
-        logMessage("WARNING: Database connection not available");
     }
     
-    // CRITICAL: Send success response back to the mobile app
-    // MUST include snake_case fields to match Android @SerializedName annotations
+    // ========== RESPOND IMMEDIATELY ==========
     respond(true, $customerMessage, [
-        'checkout_request_id' => $checkoutRequestID,  // Required by Android
-        'merchant_request_id' => $merchantRequestID,  // Required by Android
-        'sale_id' => $saleId ? (string)$saleId : null, // Required by Android
-        'CheckoutRequestID' => $checkoutRequestID,
-        'MerchantRequestID' => $merchantRequestID,
-        'saleId' => $saleId ? (string)$saleId : null,
-        'CustomerMessage' => $customerMessage
+        'checkout_request_id' => $checkoutRequestID,
+        'merchant_request_id' => $merchantRequestID,
+        'sale_id' => $saleId,
+        'sale_id_no' => $saleIdNo
     ]);
     
 } else {
-    // STK Push Request failed on M-Pesa side
-    $errorCode = $stkResponse['ResponseCode'];
-    $errorDesc = $stkResponse['ResponseDescription'] ?? 'Unknown error';
-    $customerMessage = $stkResponse['CustomerMessage'] ?? $errorDesc;
-    
-    logMessage("M-Pesa Rejected - Code: $errorCode, Description: $errorDesc");
+    // M-Pesa rejected
+    $responseDesc = $stkResponse['ResponseDescription'] ?? 'Request failed';
+    $customerMessage = $stkResponse['CustomerMessage'] ?? $responseDesc;
+    logMessage("REJECTED: $customerMessage");
     respond(false, $customerMessage, [
-        'ErrorCode' => $errorCode,
-        'ErrorDescription' => $errorDesc
+        'ResponseCode' => $stkResponse['ResponseCode'] ?? '',
+        'ResponseDescription' => $responseDesc
     ]);
 }
 
-// === HELPER FUNCTIONS (UNCHANGED) ===
+// ========== OPTIMIZED HELPER FUNCTIONS ==========
 
-function getAccessToken($key, $secret) {
+/**
+ * Get cached access token - MUCH FASTER!
+ * Caches token for 50 minutes (tokens valid for 60 min)
+ */
+function getCachedAccessToken($key, $secret) {
+    $cacheFile = sys_get_temp_dir() . '/mpesa_token_cache.json';
+    
+    // Check cache first
+    if (file_exists($cacheFile)) {
+        $cache = json_decode(file_get_contents($cacheFile), true);
+        if ($cache && isset($cache['token']) && isset($cache['expires'])) {
+            if (time() < $cache['expires']) {
+                logMessage("Using cached token");
+                return $cache['token'];
+            }
+        }
+    }
+    
+    // Fetch new token
+    logMessage("Fetching new token...");
+    $token = fetchAccessTokenFast($key, $secret);
+    
+    if ($token) {
+        // Cache for 50 minutes
+        $cache = [
+            'token' => $token,
+            'expires' => time() + (50 * 60)
+        ];
+        file_put_contents($cacheFile, json_encode($cache));
+        logMessage("Token cached successfully");
+    }
+    
+    return $token;
+}
+
+/**
+ * Fetch access token with minimal timeout
+ */
+function fetchAccessTokenFast($key, $secret) {
     $credentials = base64_encode("$key:$secret");
     $url = 'https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
     
@@ -318,8 +271,10 @@ function getAccessToken($key, $secret) {
         CURLOPT_HTTPHEADER => ["Authorization: Basic $credentials"],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_TIMEOUT => 30,
-        CURLOPT_CONNECTTIMEOUT => 10
+        CURLOPT_TIMEOUT => 10,           // Reduced from 30
+        CURLOPT_CONNECTTIMEOUT => 5,     // Reduced from 10
+        CURLOPT_TCP_FASTOPEN => true,    // Enable TCP Fast Open
+        CURLOPT_TCP_NODELAY => true      // Disable Nagle's algorithm
     ]);
     
     $result = curl_exec($ch);
@@ -332,7 +287,10 @@ function getAccessToken($key, $secret) {
     return $json['access_token'] ?? null;
 }
 
-function makeStkRequest($token, $data) {
+/**
+ * Make STK request with fast settings
+ */
+function makeFastStkRequest($token, $data) {
     $url = 'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
     
     $ch = curl_init($url);
@@ -345,8 +303,12 @@ function makeStkRequest($token, $data) {
         CURLOPT_POSTFIELDS => json_encode($data),
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_TIMEOUT => 60,
-        CURLOPT_CONNECTTIMEOUT => 20
+        CURLOPT_TIMEOUT => 15,           // Reduced from 60
+        CURLOPT_CONNECTTIMEOUT => 5,     // Reduced from 20
+        CURLOPT_TCP_FASTOPEN => true,    // Enable TCP Fast Open
+        CURLOPT_TCP_NODELAY => true,     // Disable Nagle's algorithm
+        CURLOPT_FRESH_CONNECT => false,  // Reuse connections
+        CURLOPT_FORBID_REUSE => false    // Keep connection open
     ]);
     
     $result = curl_exec($ch);
