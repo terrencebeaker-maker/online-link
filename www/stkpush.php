@@ -65,6 +65,7 @@ $accountRef = isset($input['account']) ? $input['account'] : 'PHX340123';
 $userId = isset($input['user_id']) ? $input['user_id'] : null;
 $pumpId = isset($input['pump_id']) ? $input['pump_id'] : null;
 $shiftId = isset($input['shift_id']) ? $input['shift_id'] : null;
+$stationId = isset($input['station_id']) ? (int)$input['station_id'] : 1; // Get station_id from app, default to 1
 $description = isset($input['description']) ? $input['description'] : 'Payment';
 
 if (empty($phone)) {
@@ -177,7 +178,7 @@ if (($stkResponse['ResponseCode'] ?? '1') == '0') {
                 ':amount' => $amount,
                 ':phone' => $phone,
                 ':checkout_request_id' => $checkoutRequestID,
-                ':station_id' => 1
+                ':station_id' => $stationId  // Use station_id from mobile app
             ]);
             
             $saleRow = $insertSale->fetch(PDO::FETCH_ASSOC);
