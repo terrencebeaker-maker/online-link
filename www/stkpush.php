@@ -185,6 +185,7 @@ if (($stkResponse['ResponseCode'] ?? '1') == '0') {
             $saleId = $saleRow['sale_id'] ?? null;
             
             // Also insert into mpesa_transactions for tracking - NOW WITH STATION_ID!
+            logMessage("📊 Inserting into mpesa_transactions: checkout=$checkoutRequestID, station_id=$stationId");
             $insertTrans = $conn->prepare("
                 INSERT INTO mpesa_transactions (checkout_request_id, merchant_request_id, phone, amount, status, station_id, account_ref)
                 VALUES (:checkout, :merchant, :phone, :amount, 'pending', :station_id, :account_ref)
@@ -198,7 +199,7 @@ if (($stkResponse['ResponseCode'] ?? '1') == '0') {
                 ':account_ref' => $accountRef
             ]);
             
-            logMessage("DB saved - SaleID: $saleId, SaleIdNo: $saleIdNo");
+            logMessage("✅ mpesa_transactions saved - SaleID: $saleId, SaleIdNo: $saleIdNo, StationID: $stationId");
             
         } catch (Exception $e) {
             logMessage("DB Error: " . $e->getMessage());
