@@ -266,14 +266,29 @@ if (empty($phone)) {
     respond(false, "Phone number is required");
 }
 
-// Sanitize phone
-$phone = preg_replace('/\s+/', '', $phone);
-$phone = preg_replace('/^0/', '254', $phone);
-$phone = preg_replace('/^\+/', '', $phone);
-$phone = preg_replace('/[^0-9]/', '', $phone);
+// Sanitize and format phone number
+// Supports all Kenyan formats:
+// - 07XX XXX XXX (original Safaricom, Airtel, Telkom)
+// - 011X XXX XXX (new Safaricom: 0110-0115)
+// - 010X XXX XXX (new Airtel: 0100-0109)
+// - 254XXXXXXXXX (international format)
+$phone = preg_replace('/\s+/', '', $phone);  // Remove spaces
+$phone = preg_replace('/^\+/', '', $phone);  // Remove leading +
+$phone = preg_replace('/[^0-9]/', '', $phone);  // Keep only digits
 
-if (!preg_match('/^254\d{9}$/', $phone)) {
-    respond(false, "Invalid phone number format. Use 0712345678 or 254712345678");
+// Convert local formats to international (254)
+if (preg_match('/^0(7\d{8}|1[01]\d{7})$/', $phone)) {
+    // Matches: 07xxxxxxxx, 010xxxxxxx, 011xxxxxxx
+    $phone = '254' . substr($phone, 1);
+} elseif (preg_match('/^(7\d{8}|1[01]\d{7})$/', $phone)) {
+    // Without leading 0: 7xxxxxxxx, 10xxxxxxx, 11xxxxxxx
+    $phone = '254' . $phone;
+}
+
+// Validate final format: 254 + 9 digits
+// Valid patterns: 2547xxxxxxxx, 25410xxxxxxx, 25411xxxxxxx
+if (!preg_match('/^254(7\d{8}|1[01]\d{7})$/', $phone)) {
+    respond(false, "Invalid phone number format. Supported: 07xxxxxxxx, 0110xxxxxx, 0100xxxxxx, or 254xxxxxxxxx");
 }
 
 if ($amount < 1) {

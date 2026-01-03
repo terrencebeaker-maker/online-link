@@ -72,14 +72,24 @@ if (empty($phone)) {
     respond(false, "Phone number is required");
 }
 
-// Sanitize phone - FAST
+// Sanitize and format phone number - FAST
+// Supports all Kenyan formats:
+// - 07XX XXX XXX (original Safaricom, Airtel, Telkom)
+// - 011X XXX XXX (new Safaricom: 0110-0115)
+// - 010X XXX XXX (new Airtel: 0100-0109)
+// - 254XXXXXXXXX (international format)
 $phone = preg_replace('/[^0-9]/', '', str_replace([' ', '+'], '', $phone));
-if (substr($phone, 0, 1) === '0') {
+
+// Convert local formats to international (254)
+if (preg_match('/^0(7\d{8}|1[01]\d{7})$/', $phone)) {
     $phone = '254' . substr($phone, 1);
+} elseif (preg_match('/^(7\d{8}|1[01]\d{7})$/', $phone)) {
+    $phone = '254' . $phone;
 }
 
-if (!preg_match('/^254\d{9}$/', $phone)) {
-    respond(false, "Invalid phone number format");
+// Validate: 254 + (7xxxxxxxx OR 10xxxxxxx OR 11xxxxxxx)
+if (!preg_match('/^254(7\d{8}|1[01]\d{7})$/', $phone)) {
+    respond(false, "Invalid phone number format. Supported: 07xxxxxxxx, 0110xxxxxx, 0100xxxxxx");
 }
 
 if ($amount < 1) {
