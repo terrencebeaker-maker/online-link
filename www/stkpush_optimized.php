@@ -159,8 +159,10 @@ function getCachedAccessToken($conn, $stationId, $consumerKey, $consumerSecret) 
         CURLOPT_HTTPHEADER => ["Authorization: Basic $credentials"],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_TIMEOUT => 15,
-        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 8,            // Reduced from 15s for faster response
+        CURLOPT_CONNECTTIMEOUT => 3,      // Fast connection timeout
+        CURLOPT_TCP_FASTOPEN => true,     // Enable TCP Fast Open
+        CURLOPT_TCP_NODELAY => true,      // Lower latency
     ]);
     
     $result = curl_exec($ch);
@@ -200,7 +202,7 @@ function getCachedAccessToken($conn, $stationId, $consumerKey, $consumerSecret) 
 }
 
 // =====================================================
-// OPTIMIZED STK PUSH REQUEST
+// OPTIMIZED STK PUSH REQUEST - ULTRA FAST VERSION
 // =====================================================
 function makeOptimizedStkRequest($token, $data) {
     $url = 'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
@@ -216,8 +218,12 @@ function makeOptimizedStkRequest($token, $data) {
         CURLOPT_POSTFIELDS => json_encode($data),
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_TIMEOUT => 30,
-        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 15,           // Reduced from 30s for faster response
+        CURLOPT_CONNECTTIMEOUT => 5,      // Fast connection timeout
+        CURLOPT_TCP_FASTOPEN => true,     // Enable TCP Fast Open for faster connections
+        CURLOPT_TCP_NODELAY => true,      // Disable Nagle's algorithm for lower latency
+        CURLOPT_FRESH_CONNECT => false,   // Reuse existing connections
+        CURLOPT_FORBID_REUSE => false,    // Allow connection reuse
     ]);
     
     $result = curl_exec($ch);
@@ -225,7 +231,7 @@ function makeOptimizedStkRequest($token, $data) {
     curl_close($ch);
     
     $stkTime = round((microtime(true) - $stkStart) * 1000, 2);
-    logMessage("STK API call took: {$stkTime}ms");
+    logMessage("⚡ STK API call took: {$stkTime}ms (ULTRA FAST)");
     
     if ($curlError) {
         logMessage("cURL error: $curlError");
@@ -286,9 +292,12 @@ if (preg_match('/^0(7\d{8}|1[01]\d{7})$/', $phone)) {
 }
 
 // Validate final format: 254 + 9 digits
-// Valid patterns: 2547xxxxxxxx, 25410xxxxxxx, 25411xxxxxxx
+// Valid patterns: 
+// - 2547xxxxxxxx (traditional 07xx format)
+// - 25410xxxxxxx (new Airtel 010x format)
+// - 25411xxxxxxx (new Safaricom 011x format: 0110-0119)
 if (!preg_match('/^254(7\d{8}|1[01]\d{7})$/', $phone)) {
-    respond(false, "Invalid phone number format. Supported: 07xxxxxxxx, 0110xxxxxx, 0100xxxxxx, or 254xxxxxxxxx");
+    respond(false, "Invalid phone number format. Supported: 07XXXXXXXX, 0110XXXXXX, 0119XXXXXX, 0100XXXXXX, or 254XXXXXXXXX");
 }
 
 if ($amount < 1) {
